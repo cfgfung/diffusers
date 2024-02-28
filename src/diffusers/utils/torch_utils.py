@@ -49,6 +49,10 @@ def randn_tensor(
     rand_device = device
     batch_size = shape[0]
 
+    # Patch for HPU - HPU does not work well with torch.randn
+    if device.type == "hpu":
+        rand_device = "cpu" 
+
     layout = layout or torch.strided
     device = device or torch.device("cpu")
 

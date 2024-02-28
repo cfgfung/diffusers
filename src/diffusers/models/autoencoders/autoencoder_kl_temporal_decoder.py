@@ -92,7 +92,20 @@ class TemporalDecoder(nn.Module):
     ) -> torch.FloatTensor:
         r"""The forward method of the `Decoder` class."""
 
-        sample = self.conv_in(sample)
+        #XPU Patch
+        import pdb; pdb.set_trace()
+        import habana_frameworks.torch.hpu as hthpu
+        if hthpu.is_autocast_hpu_enabled():
+            sample = self.conv_in(sample.to(torch.float))
+        # Workaround for Gaudi2 and full bf16
+        elif self.conv_in.bias.dtype == torch.float and sample.dtype == torch.bfloat16:
+            sample = self.conv_in(sample.to(torch.float)).to(torch.bfloat16)
+        else:
+            sample = self.conv_in(sample)
+
+        #sample = self.conv_in(sample)
+
+        import pdb; pdb.set_trace()
 
         upscale_dtype = next(iter(self.up_blocks.parameters())).dtype
         if self.training and self.gradient_checkpointing:
@@ -139,14 +152,21 @@ class TemporalDecoder(nn.Module):
                     )
         else:
             # middle
-            sample = self.mid_block(sample, image_only_indicator=image_only_indicator)
-            sample = sample.to(upscale_dtype)
+            # sample = self.mid_block(sample, image_only_indicator=image_only_indicator) #OK
+            # sample = sample.to(torch.float) # patch to float64 for calculations
+            # sample = sample.to(upscale_dtype)
+
+            # XPU Patch
+            sample = self.mid_block(sample, image_only_indicator=image_only_indicator) #OK, calculate with torch.float32
+            sample = sample.to(upscale_dtype) #ok
 
             # up
             for up_block in self.up_blocks:
                 sample = up_block(sample, image_only_indicator=image_only_indicator)
 
+            
         # post-process
+        import pdb; pdb.set_trace()
         sample = self.conv_norm_out(sample)
         sample = self.conv_act(sample)
         sample = self.conv_out(sample)
@@ -208,6 +228,7 @@ class AutoencoderKLTemporalDecoder(ModelMixin, ConfigMixin):
     ):
         super().__init__()
 
+        #import pdb; pdb.set_trace()
         # pass init params to Encoder
         self.encoder = Encoder(
             in_channels=in_channels,
@@ -338,7 +359,7 @@ class AutoencoderKLTemporalDecoder(ModelMixin, ConfigMixin):
 
         return AutoencoderKLOutput(latent_dist=posterior)
 
-    @apply_forward_hook
+    #@apply_forward_hook
     def decode(
         self,
         z: torch.FloatTensor,
@@ -363,10 +384,12 @@ class AutoencoderKLTemporalDecoder(ModelMixin, ConfigMixin):
         image_only_indicator = torch.zeros(batch_size, num_frames, dtype=z.dtype, device=z.device)
         decoded = self.decoder(z, num_frames=num_frames, image_only_indicator=image_only_indicator)
 
-        if not return_dict:
-            return (decoded,)
-
-        return DecoderOutput(sample=decoded)
+        #XPU Patch
+        import pdb; pdb.set_trace()
+        return decoded
+        # if not return_dict:
+        #     return (decoded,)
+        # return DecoderOutput(sample=decoded)
 
     def forward(
         self,
